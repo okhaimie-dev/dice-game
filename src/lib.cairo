@@ -4,6 +4,7 @@ use starknet::ContractAddress;
 pub trait IERC<TContractState> {
     fn transfer(ref self: TContractState, recipent: ContractAddress, amount: u8) -> bool;
 }
+// TODO: ADD ERC20 token for airdrop to the winner
 
 #[starknet::interface]
 pub trait IDiceGame<TContractState> {
@@ -88,6 +89,7 @@ mod DiceGame {
         }
 
         fn claim_prize(ref self: ContractState) -> bool {
+            // TODO
             true
         }
 
