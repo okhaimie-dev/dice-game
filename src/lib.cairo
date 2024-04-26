@@ -4,36 +4,12 @@ use starknet::ContractAddress;
 pub trait IERC<TContractState> {
     fn transfer(ref self: TContractState, recipent: ContractAddress, amount: u8) -> bool;
 }
-// TODO: ADD ERC20 token for airdrop to the winner
 
 #[starknet::interface]
 pub trait IDiceGame<TContractState> {
-    fn guess_side(ref self: TContractState, side: u8) -> bool;
+    fn guess(ref self: TContractState, guess: felt252);
+    fn process_randomness(ref self: TContractState);
     fn claim_prize(ref self: TContractState) -> bool;
-    fn get_last_random_number(self: @TContractState) -> felt252;
-
-    // @dev Function to request random words from the VRF contract.
-    fn request_randomness_from_pragma(
-        ref self: TContractState,
-        seed: u64,
-        callback_address: ContractAddress,
-        callback_fee_limit: u128,
-        publish_delay: u64,
-        num_words: u64,
-        calldata: Array<felt252>
-    );
-
-    // @dev Callback function for the VRF contract to call when the random words are ready.
-    fn receive_random_words(
-        ref self: TContractState,
-        requester_address: ContractAddress,
-        request_id: u64,
-        random_words: Span<felt252>,
-        calldata: Array<felt252>
-    );
-
-    // @dev Function to call to withdraw funds used to fund calls to VRF contract
-    fn withdraw_extra_fee_fund(ref self: TContractState, receiver: ContractAddress);
 }
 
 #[starknet::contract]
@@ -42,7 +18,7 @@ mod DiceGame {
         ContractAddress, contract_address_const, get_block_number, get_caller_address, get_contract_address
     };
     use pragma_lib::abi::{IRandomnessDispatcher, IRandomnessDispatcherTrait};
-    use openzeppelin::token::erc20::interface::{ERC20ABIDispatcher, ERC20ABIDispatcherTrait};
+    use openzeppelin::token::erc20::interface::{ERC20ABIDispatcher, ERC20ABIDispatcherTrait, IERC20Dispatcher};
     use openzeppelin::access::ownable::OwnableComponent;
 
     component!(path: OwnableComponent, storage: ownable, event: OwnableEvent);
@@ -53,11 +29,14 @@ mod DiceGame {
 
     #[storage]
     struct Storage {
+        user_guesses: LegacyMap<ContractAddress, felt252>,
+        user_balances: LegacyMap<ContractAddress, u256>,
         randomness_contract_address: ContractAddress,
         min_block_number_storage: u64,
         last_random_storage: felt252,
         token_contract: ContractAddress,
         winner: ContractAddress,
+        erc20_token: IERC20Dispatcher,
         #[substorage(v0)]
         ownable: OwnableComponent::Storage
     }
@@ -70,27 +49,17 @@ mod DiceGame {
     }
 
     #[constructor]
-    fn constructor(ref self: ContractState, randomness_contract_address: ContractAddress, owner: ContractAddress) {
+    fn constructor(ref self: ContractState, randomness_contract_address: ContractAddress, owner: ContractAddress, erc20_token: ContractAddress) {
         self.ownable.initializer(owner);
+        self.erc20_token.write(IERC20Dispatcher { contract_address: erc20_token });
         self.randomness_contract_address.write(randomness_contract_address);
     }
 
-    #[abi(embed_v0)]
-    impl DiceGame of super::IDiceGame<ContractState> {
-        fn guess_side(ref self: ContractState, side: u8) -> bool {
-           assert(self.last_random_storage.read() == 0, 'Random number not ready yet');
-           let random_number = self.get_last_random_number();
-           ((random_number % 6) + 1).try_into().unwrap() == side;
-        }
-
+    #[generate_trait]
+    impl PragmaOracle of PragmaOracleTrait {
         fn get_last_random_number(self: @ContractState) -> felt252 {
             let last_random = self.last_random_storage.read();
             last_random
-        }
-
-        fn claim_prize(ref self: ContractState) -> bool {
-            // TODO
-            true
         }
 
         fn request_randomness_from_pragma(
@@ -162,5 +131,33 @@ mod DiceGame {
             let balance = eth_dispatcher.balance_of(get_contract_address());
             eth_dispatcher.transfer(receiver, balance);
         }
-    } 
+    }
+
+    #[abi(embed_v0)]
+    impl DiceGame of super::IDiceGame<ContractState> {
+        fn guess(ref self: ContractState, guess: felt252) {
+            assert!(guess >= 1 && guess <=6, "Invalid guess");
+
+            let caller = get_caller_address();
+            self.user_guesses.write(caller, guess);
+        }
+
+        fn process_randomness(ref self: ContractState) {
+            let caller = get_caller_address();
+            let user_guess = self.user_guesses.read(caller);
+
+            if user_guess == self.last_random_storage.read() {
+                // Mint and transfer one token to the user
+                self.erc20_token.read().transfer(caller, 1);
+                self.user_balances.write(caller, self.user_balances.read(caller) + 1);
+            }
+        }
+
+        fn claim_prize(ref self: ContractState) -> bool {
+            // TODO
+            true
+        }
+
+        
+    }
 }
