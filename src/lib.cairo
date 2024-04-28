@@ -67,7 +67,7 @@ mod DiceGame {
             num_words: u64,
             calldata: Array<felt252>
         ) {
-            let randomness_contract_address = self.randomness_contract_address.read();
+            let randomness_contract_address = self.pragma_vrf_contract_address.read();
             let randomness_dispatcher = IRandomnessDispatcher {
                 contract_address: randomness_contract_address
             };
@@ -105,7 +105,7 @@ mod DiceGame {
             // Have to make sure that the caller is the Pragma Randomness Oracle contract
             let caller_address = get_caller_address();
             assert(
-                caller_address == self.randomness_contract_address.read(),
+                caller_address == self.pragma_vrf_contract_address.read(),
                 'caller not randomness contract'
             );
             // and that the current block is within publish_delay of the request block
