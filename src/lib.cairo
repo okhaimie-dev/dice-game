@@ -3,7 +3,9 @@ use starknet::ContractAddress;
 #[starknet::interface]
 pub trait IDiceGame<TContractState> {
     fn guess(ref self: TContractState, guess: u8);
-    fn process_winners(ref self: TContractState);
+    fn toggle_play_window(ref self: TContractState);
+    fn get_game_window(self: @TContractState) -> bool;
+    fn process_game_winners(ref self: TContractState);
 }
 
 #[starknet::interface]
@@ -48,9 +50,9 @@ mod DiceGame {
         user_guesses: LegacyMap<ContractAddress, u8>,
         user_balances: LegacyMap<ContractAddress, u256>,
         pragma_vrf_contract_address: ContractAddress,
+        game_window: bool,
         min_block_number_storage: u64,
         last_random_storage: felt252,
-        erc20_token: IERC20Dispatcher,
         #[substorage(v0)]
         ownable: OwnableComponent::Storage
     }
@@ -68,6 +70,7 @@ mod DiceGame {
     fn constructor(ref self: ContractState, pragma_vrf_contract_address: ContractAddress, owner: ContractAddress) {
         self.ownable.initializer(owner);
         self.pragma_vrf_contract_address.write(pragma_vrf_contract_address);
+        self.game_window.write(false);
     }
 
     #[abi(embed_v0)]
@@ -79,9 +82,22 @@ mod DiceGame {
             self.user_guesses.write(caller, guess);
         }
 
+        fn toggle_play_window(ref self: ContractState) {
+            self.ownable.assert_only_owner();
+
+            let current: bool = self.game_window.read();
+            let toggle: bool = !current;
+            self.game_window.write(toggle);
+        }
+
+        fn get_game_window(self: @ContractState) -> bool {
+            self.game_window.read()
+        }
 
         // @dev function is used to process winners and mint tokens as prizes
-        fn process_winners(ref self: ContractState) {
+        fn process_game_winners(ref self: ContractState) {
+            assert!(self.game_window.read() == false, "Game window not closed");
+
             let caller = get_caller_address();
             let user_guess = self.user_guesses.read(caller);
 
