@@ -7,7 +7,7 @@ pub trait IERC<TContractState> {
 
 #[starknet::interface]
 pub trait IDiceGame<TContractState> {
-    fn guess(ref self: TContractState, guess: felt252);
+    fn guess(ref self: TContractState, guess: u8);
     fn process_randomness(ref self: TContractState);
     fn claim_prize(ref self: TContractState) -> bool;
 }
@@ -18,7 +18,7 @@ mod DiceGame {
         ContractAddress, contract_address_const, get_block_number, get_caller_address, get_contract_address
     };
     use pragma_lib::abi::{IRandomnessDispatcher, IRandomnessDispatcherTrait};
-    use openzeppelin::token::erc20::interface::{ERC20ABIDispatcher, ERC20ABIDispatcherTrait, IERC20Dispatcher};
+    use openzeppelin::token::erc20::interface::{ERC20ABIDispatcher, ERC20ABIDispatcherTrait, IERC20Dispatcher, IERC20DispatcherTrait};
     use openzeppelin::access::ownable::OwnableComponent;
 
     component!(path: OwnableComponent, storage: ownable, event: OwnableEvent);
@@ -29,7 +29,7 @@ mod DiceGame {
 
     #[storage]
     struct Storage {
-        user_guesses: LegacyMap<ContractAddress, felt252>,
+        user_guesses: LegacyMap<ContractAddress, u8>,
         user_balances: LegacyMap<ContractAddress, u256>,
         randomness_contract_address: ContractAddress,
         min_block_number_storage: u64,
@@ -40,6 +40,8 @@ mod DiceGame {
         #[substorage(v0)]
         ownable: OwnableComponent::Storage
     }
+
+    pub const ERC20_PRIZE_TOKEN: felt252 = 0x049d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc7;
 
     #[event]
     #[derive(Drop, starknet::Event)]
@@ -135,7 +137,7 @@ mod DiceGame {
 
     #[abi(embed_v0)]
     impl DiceGame of super::IDiceGame<ContractState> {
-        fn guess(ref self: ContractState, guess: felt252) {
+        fn guess(ref self: ContractState, guess: u8) {
             assert!(guess >= 1 && guess <=6, "Invalid guess");
 
             let caller = get_caller_address();
@@ -146,9 +148,13 @@ mod DiceGame {
             let caller = get_caller_address();
             let user_guess = self.user_guesses.read(caller);
 
-            if user_guess == self.last_random_storage.read() {
+            let erc_20_token = IERC20Dispatcher {
+                contract_address: contract_address_const::<ERC20_PRIZE_TOKEN>()
+            };
+
+            if user_guess.try_into().unwrap() == self.last_random_storage.read() {
                 // Mint and transfer one token to the user
-                self.erc20_token.read().transfer(caller, 1);
+                erc_20_token._mint(caller, 10);
                 self.user_balances.write(caller, self.user_balances.read(caller) + 1);
             }
         }
