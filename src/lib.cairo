@@ -86,8 +86,7 @@ mod DiceGame {
             self.ownable.assert_only_owner();
 
             let current: bool = self.game_window.read();
-            let toggle: bool = !current;
-            self.game_window.write(toggle);
+            self.game_window.write(!current);
         }
 
         fn get_game_window(self: @ContractState) -> bool {
