@@ -76,6 +76,7 @@ mod DiceGame {
     #[abi(embed_v0)]
     impl DiceGame of super::IDiceGame<ContractState> {
         fn guess(ref self: ContractState, guess: u8) {
+            assert!(self.game_window.read() == true, "Game window not open");
             assert!(guess >= 1 && guess <=6, "Invalid guess");
 
             let caller = get_caller_address();
