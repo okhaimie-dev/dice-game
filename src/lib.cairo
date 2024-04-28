@@ -1,11 +1,6 @@
 use starknet::ContractAddress;
 
 #[starknet::interface]
-pub trait IERC<TContractState> {
-    fn transfer(ref self: TContractState, recipent: ContractAddress, amount: u8) -> bool;
-}
-
-#[starknet::interface]
 pub trait IDiceGame<TContractState> {
     fn guess(ref self: TContractState, guess: u8);
     fn process_randomness(ref self: TContractState);
