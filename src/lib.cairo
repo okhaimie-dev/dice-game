@@ -6,6 +6,28 @@ pub trait IDiceGame<TContractState> {
     fn process_winners(ref self: TContractState);
 }
 
+#[starknet::interface]
+pub trait IPragmaVRF<TContractState> {
+    fn get_last_random_number(self: @TContractState) -> felt252;
+    fn request_randomness_from_pragma(
+        ref self: TContractState,
+        seed: u64,
+        callback_address: ContractAddress,
+        callback_fee_limit: u128,
+        publish_delay: u64,
+        num_words: u64,
+        calldata: Array<felt252>
+    );
+    fn receive_random_words(
+        ref self: TContractState,
+        requester_address: ContractAddress,
+        request_id: u64,
+        random_words: Span<felt252>,
+        calldata: Array<felt252>
+    );
+    fn withdraw_extra_fee_fund(ref self: TContractState, receiver: ContractAddress);
+}
+
 #[starknet::contract]
 mod DiceGame {
     use starknet::{
@@ -28,8 +50,6 @@ mod DiceGame {
         pragma_vrf_contract_address: ContractAddress,
         min_block_number_storage: u64,
         last_random_storage: felt252,
-        token_contract: ContractAddress,
-        winner: ContractAddress,
         erc20_token: IERC20Dispatcher,
         #[substorage(v0)]
         ownable: OwnableComponent::Storage
@@ -45,14 +65,45 @@ mod DiceGame {
     }
 
     #[constructor]
-    fn constructor(ref self: ContractState, pragma_vrf_contract_address: ContractAddress, owner: ContractAddress, erc20_token: ContractAddress) {
+    fn constructor(ref self: ContractState, pragma_vrf_contract_address: ContractAddress, owner: ContractAddress) {
         self.ownable.initializer(owner);
-        self.erc20_token.write(IERC20Dispatcher { contract_address: erc20_token });
         self.pragma_vrf_contract_address.write(pragma_vrf_contract_address);
     }
 
-    #[generate_trait]
-    impl PragmaOracle of PragmaOracleTrait {
+    #[abi(embed_v0)]
+    impl DiceGame of super::IDiceGame<ContractState> {
+        fn guess(ref self: ContractState, guess: u8) {
+            assert!(guess >= 1 && guess <=6, "Invalid guess");
+
+            let caller = get_caller_address();
+            self.user_guesses.write(caller, guess);
+        }
+
+
+        // @dev function is used to process winners and mint tokens as prizes
+        fn process_winners(ref self: ContractState) {
+            let caller = get_caller_address();
+            let user_guess = self.user_guesses.read(caller);
+
+            let erc_20_token = IERC20Dispatcher {
+                contract_address: contract_address_const::<ERC20_PRIZE_TOKEN>()
+            };
+
+            // let reduced_random_number: felt252 = self.last_random_storage.read().try_into().unwrap() % 6 + 1;
+
+            // if user_guess.try_into().unwrap() == reduced_random_number {
+            //     // Mint and transfer one token to the user
+            //     erc_20_token._mint(caller, 10);
+            //     self.user_balances.write(caller, self.user_balances.read(caller) + 1);
+            // }
+        }
+
+        
+    }
+
+
+    #[abi(embed_v0)]
+    impl PragmaVRFOracle of super::IPragmaVRF<ContractState> {
         fn get_last_random_number(self: @ContractState) -> felt252 {
             let last_random = self.last_random_storage.read();
             last_random
@@ -127,36 +178,5 @@ mod DiceGame {
             let balance = eth_dispatcher.balance_of(get_contract_address());
             eth_dispatcher.transfer(receiver, balance);
         }
-    }
-
-    #[abi(embed_v0)]
-    impl DiceGame of super::IDiceGame<ContractState> {
-        fn guess(ref self: ContractState, guess: u8) {
-            assert!(guess >= 1 && guess <=6, "Invalid guess");
-
-            let caller = get_caller_address();
-            self.user_guesses.write(caller, guess);
-        }
-
-
-        // @dev function is used to process winners and mint tokens as prizes
-        fn process_winners(ref self: ContractState) {
-            let caller = get_caller_address();
-            let user_guess = self.user_guesses.read(caller);
-
-            let erc_20_token = IERC20Dispatcher {
-                contract_address: contract_address_const::<ERC20_PRIZE_TOKEN>()
-            };
-
-            let reduced_random_number: felt252 = self.last_random_storage.read().try_into().unwrap() % 6 + 1;
-
-            if user_guess.try_into().unwrap() == reduced_random_number {
-                // Mint and transfer one token to the user
-                erc_20_token._mint(caller, 10);
-                self.user_balances.write(caller, self.user_balances.read(caller) + 1);
-            }
-        }
-
-        
     }
 }
