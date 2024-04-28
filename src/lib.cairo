@@ -3,8 +3,7 @@ use starknet::ContractAddress;
 #[starknet::interface]
 pub trait IDiceGame<TContractState> {
     fn guess(ref self: TContractState, guess: u8);
-    fn process_randomness(ref self: TContractState);
-    fn claim_prize(ref self: TContractState) -> bool;
+    fn process_winners(ref self: TContractState);
 }
 
 #[starknet::contract]
@@ -26,7 +25,7 @@ mod DiceGame {
     struct Storage {
         user_guesses: LegacyMap<ContractAddress, u8>,
         user_balances: LegacyMap<ContractAddress, u256>,
-        randomness_contract_address: ContractAddress,
+        pragma_vrf_contract_address: ContractAddress,
         min_block_number_storage: u64,
         last_random_storage: felt252,
         token_contract: ContractAddress,
@@ -46,10 +45,10 @@ mod DiceGame {
     }
 
     #[constructor]
-    fn constructor(ref self: ContractState, randomness_contract_address: ContractAddress, owner: ContractAddress, erc20_token: ContractAddress) {
+    fn constructor(ref self: ContractState, pragma_vrf_contract_address: ContractAddress, owner: ContractAddress, erc20_token: ContractAddress) {
         self.ownable.initializer(owner);
         self.erc20_token.write(IERC20Dispatcher { contract_address: erc20_token });
-        self.randomness_contract_address.write(randomness_contract_address);
+        self.pragma_vrf_contract_address.write(pragma_vrf_contract_address);
     }
 
     #[generate_trait]
@@ -139,7 +138,9 @@ mod DiceGame {
             self.user_guesses.write(caller, guess);
         }
 
-        fn process_randomness(ref self: ContractState) {
+
+        // @dev function is used to process winners and mint tokens as prizes
+        fn process_winners(ref self: ContractState) {
             let caller = get_caller_address();
             let user_guess = self.user_guesses.read(caller);
 
@@ -147,16 +148,13 @@ mod DiceGame {
                 contract_address: contract_address_const::<ERC20_PRIZE_TOKEN>()
             };
 
-            if user_guess.try_into().unwrap() == self.last_random_storage.read() {
+            let reduced_random_number: felt252 = self.last_random_storage.read().try_into().unwrap() % 6 + 1;
+
+            if user_guess.try_into().unwrap() == reduced_random_number {
                 // Mint and transfer one token to the user
                 erc_20_token._mint(caller, 10);
                 self.user_balances.write(caller, self.user_balances.read(caller) + 1);
             }
-        }
-
-        fn claim_prize(ref self: ContractState) -> bool {
-            // TODO
-            true
         }
 
         
