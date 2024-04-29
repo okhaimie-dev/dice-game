@@ -50,6 +50,7 @@ mod DiceGame {
         user_guesses: LegacyMap<ContractAddress, u8>,
         user_balances: LegacyMap<ContractAddress, u256>,
         pragma_vrf_contract_address: ContractAddress,
+        token: IERC20Dispatcher,
         game_window: bool,
         min_block_number_storage: u64,
         last_random_storage: felt252,
@@ -67,9 +68,10 @@ mod DiceGame {
     }
 
     #[constructor]
-    fn constructor(ref self: ContractState, pragma_vrf_contract_address: ContractAddress, owner: ContractAddress) {
+    fn constructor(ref self: ContractState, pragma_vrf_contract_address: ContractAddress, owner: ContractAddress, token: ContractAddress) {
         self.ownable.initializer(owner);
         self.pragma_vrf_contract_address.write(pragma_vrf_contract_address);
+        self.token.write(IERC20Dispatcher { contract_address: token });
         self.game_window.write(false);
     }
 
@@ -101,17 +103,15 @@ mod DiceGame {
             let caller = get_caller_address();
             let user_guess = self.user_guesses.read(caller);
 
-            let erc_20_token = IERC20Dispatcher {
-                contract_address: contract_address_const::<ERC20_PRIZE_TOKEN>()
-            };
+            let token = self.token.read();
 
-            // let reduced_random_number: felt252 = self.last_random_storage.read().try_into().unwrap() % 6 + 1;
+            let reduced_random_number: u8 = self.last_random_storage.read().try_into().unwrap() % 6 + 1;
 
-            // if user_guess.try_into().unwrap() == reduced_random_number {
-            //     // Mint and transfer one token to the user
-            //     erc_20_token._mint(caller, 10);
-            //     self.user_balances.write(caller, self.user_balances.read(caller) + 1);
-            // }
+            if user_guess.try_into().unwrap() == reduced_random_number {
+                // Mint and transfer one token to the user
+                token.transfer(caller, 1);
+                // self.user_balances.write(caller, self.user_balances.read(caller) + 1);
+            }
         }
 
         
@@ -134,6 +134,8 @@ mod DiceGame {
             num_words: u64,
             calldata: Array<felt252>
         ) {
+            self.ownable.assert_only_owner();
+
             let randomness_contract_address = self.pragma_vrf_contract_address.read();
             let randomness_dispatcher = IRandomnessDispatcher {
                 contract_address: randomness_contract_address
