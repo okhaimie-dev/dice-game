@@ -68,8 +68,8 @@ mod DiceGame {
     #[derive(Drop, starknet::Event)]
     struct ResultAnnouncement {
         caller: ContractAddress,
-        guess: u8,
-        random_number: u8
+        guess: u256,
+        random_number: u256
     }
 
     #[constructor]
@@ -105,9 +105,9 @@ mod DiceGame {
             assert(self.last_random_number.read() != 0, 'NO_RANDOM_NUMBER_YET');
 
             let caller = get_caller_address();
-            let user_guess: u8 = self.user_guesses.read(caller);
+            let user_guess: u256 = self.user_guesses.read(caller).into();
 
-            let reduced_random_number: u8 = self.last_random_number.read().try_into().unwrap() % 6 + 1;
+            let reduced_random_number: u256 = self.last_random_number.read().into() % 6 + 1;
 
             if user_guess == reduced_random_number {
                 self.emit(Event::GameWinner(ResultAnnouncement {
