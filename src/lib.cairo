@@ -36,7 +36,7 @@ mod DiceGame {
         ContractAddress, contract_address_const, get_block_number, get_caller_address, get_contract_address
     };
     use pragma_lib::abi::{IRandomnessDispatcher, IRandomnessDispatcherTrait};
-    use openzeppelin::token::erc20::interface::{ERC20ABIDispatcher, ERC20ABIDispatcherTrait, IERC20Dispatcher, IERC20DispatcherTrait};
+    use openzeppelin::token::erc20::interface::{ERC20ABIDispatcher, ERC20ABIDispatcherTrait};
     use openzeppelin::access::ownable::OwnableComponent;
 
     component!(path: OwnableComponent, storage: ownable, event: OwnableEvent);
@@ -48,38 +48,42 @@ mod DiceGame {
     #[storage]
     struct Storage {
         user_guesses: LegacyMap<ContractAddress, u8>,
-        user_balances: LegacyMap<ContractAddress, u256>,
         pragma_vrf_contract_address: ContractAddress,
-        token: IERC20Dispatcher,
         game_window: bool,
         min_block_number_storage: u64,
-        last_random_storage: felt252,
+        last_random_number: felt252,
         #[substorage(v0)]
         ownable: OwnableComponent::Storage
     }
 
-    pub const ERC20_PRIZE_TOKEN: felt252 = 0x049d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc7;
-
     #[event]
     #[derive(Drop, starknet::Event)]
     enum Event {
+        GameWinner: ResultAnnouncement,
+        GameLost: ResultAnnouncement,
         #[flat]
         OwnableEvent: OwnableComponent::Event
     }
 
+    #[derive(Drop, starknet::Event)]
+    struct ResultAnnouncement {
+        caller: ContractAddress,
+        guess: u8,
+        random_number: u8
+    }
+
     #[constructor]
-    fn constructor(ref self: ContractState, pragma_vrf_contract_address: ContractAddress, owner: ContractAddress, token: ContractAddress) {
+    fn constructor(ref self: ContractState, pragma_vrf_contract_address: ContractAddress, owner: ContractAddress) {
         self.ownable.initializer(owner);
         self.pragma_vrf_contract_address.write(pragma_vrf_contract_address);
-        self.token.write(IERC20Dispatcher { contract_address: token });
-        self.game_window.write(false);
+        self.game_window.write(true);
     }
 
     #[abi(embed_v0)]
     impl DiceGame of super::IDiceGame<ContractState> {
         fn guess(ref self: ContractState, guess: u8) {
-            assert!(self.game_window.read() == true, "Game window not open");
-            assert!(guess >= 1 && guess <=6, "Invalid guess");
+            assert(self.game_window.read(), 'GAME_INACTIVE');
+            assert(guess >= 1 && guess <=6, 'INVALID_GUESS');
 
             let caller = get_caller_address();
             self.user_guesses.write(caller, guess);
@@ -96,32 +100,35 @@ mod DiceGame {
             self.game_window.read()
         }
 
-        // @dev function is used to process winners and mint tokens as prizes
         fn process_game_winners(ref self: ContractState) {
-            assert!(self.game_window.read() == false, "Game window not closed");
+            assert(!self.game_window.read(), 'GAME_ACTIVE');
+            assert(self.last_random_number.read() != 0, 'NO_RANDOM_NUMBER_YET');
 
             let caller = get_caller_address();
-            let user_guess = self.user_guesses.read(caller);
+            let user_guess: u8 = self.user_guesses.read(caller);
 
-            let token = self.token.read();
+            let reduced_random_number: u8 = self.last_random_number.read().try_into().unwrap() % 6 + 1;
 
-            let reduced_random_number: u8 = self.last_random_storage.read().try_into().unwrap() % 6 + 1;
-
-            if user_guess.try_into().unwrap() == reduced_random_number {
-                // Mint and transfer one token to the user
-                token.transfer(caller, 1);
-                // self.user_balances.write(caller, self.user_balances.read(caller) + 1);
+            if user_guess == reduced_random_number {
+                self.emit(Event::GameWinner(ResultAnnouncement {
+                    caller: caller,
+                    guess: user_guess,
+                    random_number: reduced_random_number
+                }));
+            } else {
+                self.emit(Event::GameLost(ResultAnnouncement {
+                    caller: caller,
+                    guess: user_guess,
+                    random_number: reduced_random_number
+                }));
             }
         }
-
-        
     }
-
 
     #[abi(embed_v0)]
     impl PragmaVRFOracle of super::IPragmaVRF<ContractState> {
         fn get_last_random_number(self: @ContractState) -> felt252 {
-            let last_random = self.last_random_storage.read();
+            let last_random = self.last_random_number.read();
             last_random
         }
 
@@ -183,7 +190,7 @@ mod DiceGame {
             assert(min_block_number <= current_block_number, 'block number issue');
 
             let random_word = *random_words.at(0);
-            self.last_random_storage.write(random_word);
+            self.last_random_number.write(random_word);
         }
 
         fn withdraw_extra_fee_fund(ref self: ContractState, receiver: ContractAddress) {
